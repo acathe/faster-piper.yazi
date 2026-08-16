@@ -417,6 +417,7 @@ local function generate_cache(job, cache_path)
     :arg({ "-c", cmd })
     :env("w", tostring(job.area.w))
     :env("h", tostring(job.area.h))
+    :env("t", rt.term.light() and "light" or "dark")
     :env("FP_TPL", tpl) -- EXACT template string we used
     :stdin(Command.NULL)
     :stdout(Command.NULL)
