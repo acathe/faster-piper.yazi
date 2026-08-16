@@ -17,17 +17,27 @@ local LOCK_TTL_SEC = 60
 -- When adding a new header field:
 --   1) insert it into this layout
 --   2) bump HEADER.N
---   3) update any reader functions that fetch header fields
+--   3) bump HEADER.VERSION so existing caches are discarded
+--   4) update any reader functions that fetch header fields
 ----------------------------------------------------------------------
 
 local HEADER = {
+  -- Layout marker, always stored on the FIRST line.
+  --
+  -- Bump this on ANY change to the layout below. A cache written by an
+  -- older version then fails validation, is removed, and is regenerated.
+  -- This is what makes header changes safe; there is no migration path.
+  VERSION = "FPCACHE1",
+
   -- Total number of header lines stored at the top of the cache file.
-  N = 3,
+  N = 5,
 
   -- Which header line contains what (1-based):
-  LINE_CMD   = 1, -- raw user-provided command template (job.args[1], unchanged)
-  LINE_NLINE = 2, -- number of *content* lines (excludes headers)
-  LINE_W     = 3, -- preview width used to generate this cache
+  LINE_VER   = 1, -- layout marker, must equal HEADER.VERSION
+  LINE_CMD   = 2, -- raw user-provided command template (job.args[1], unchanged)
+  LINE_NLINE = 3, -- number of *content* lines (excludes headers)
+  LINE_W     = 4, -- preview width used to generate this cache
+  LINE_T     = 5, -- terminal theme used to generate this cache ("dark"|"light")
 }
 
 -- Content starts immediately after the header.
@@ -164,10 +174,41 @@ end
 
 local read_cache_header  -- forward declaration
 
+----------------------------------------------------------------------
+-- Terminal theme, as exposed to preview commands via $t.
+--
+-- rt.term.light() returns nil when the terminal does not report a
+-- colour scheme. We treat that as "dark", which matches Yazi's own
+-- default appearance. The fallback is deliberate and documented in the
+-- README, because a user on an unreporting light terminal has no other
+-- way to explain the result.
+----------------------------------------------------------------------
+local function current_theme()
+  return rt.term.light() and "light" or "dark"
+end
+
+----------------------------------------------------------------------
+-- Does `tpl` read the environment variable `name`?
+--
+-- Matches "$name" and "${name}". The frontier pattern stops "$t" from
+-- matching inside "$theme".
+--
+-- Over-matching is harmless: "$t" inside single quotes, or escaped as
+-- "\$t", costs one extra cache rebuild. Under-matching would leave a
+-- stale cache, so the check errs toward rebuilding.
+----------------------------------------------------------------------
+local function uses_env(tpl, name)
+  if tpl:find("${" .. name .. "}", 1, true) then
+    return true
+  end
+  return tpl:find("%$" .. name .. "%f[^%w_]") ~= nil
+end
+
 -- Header-based freshness check:
 -- - cache mtime >= source mtime
 -- - header parses
 -- - header width matches current preview width
+-- - header theme matches current theme, IF the recipe uses $t
 -- Returns:
 --   ok, hdr
 -- where hdr is the parsed header if available.
@@ -184,6 +225,17 @@ local function cache_is_fresh(job, cache_path)
   end
 
   if hdr.w ~= job.area.w then
+    return false, nil
+  end
+
+  -- Only the theme the recipe actually reads can affect its output.
+  -- A recipe without $t is theme-independent, so a theme change must
+  -- not throw its cache away.
+  --
+  -- Caveat: a command that detects the theme by itself (e.g.
+  -- `bat --theme=auto:always`) is invisible to this test, and its cache
+  -- will not refresh. See the README.
+  if uses_env(hdr.cmd, "t") and hdr.t ~= current_theme() then
     return false, nil
   end
 
@@ -324,9 +376,17 @@ read_cache_header = function(cache_path)
     return nil, "incomplete cache header (need " .. HEADER.N .. " lines, got " .. #lines .. ")"
   end
 
+  -- Check the layout marker BEFORE anything else. A cache written by an
+  -- older version has a different layout, so every offset below is wrong
+  -- for it. Rejecting here makes the caller discard and regenerate it.
+  if lines[HEADER.LINE_VER] ~= HEADER.VERSION then
+    return nil, "cache header layout is outdated; expected " .. HEADER.VERSION
+  end
+
   local cmd = lines[HEADER.LINE_CMD]
   local nline = tonumber((lines[HEADER.LINE_NLINE] or ""):match("^%s*(%d+)%s*$"))
   local w = tonumber((lines[HEADER.LINE_W] or ""):match("^%s*(%d+)%s*$"))
+  local t = (lines[HEADER.LINE_T] or ""):match("^%s*(%a+)%s*$")
 
   if cmd == nil then
     return nil, "missing cmd header line"
@@ -337,8 +397,11 @@ read_cache_header = function(cache_path)
   if not w then
     return nil, "invalid width header: " .. tostring(lines[HEADER.LINE_W])
   end
+  if t ~= "dark" and t ~= "light" then
+    return nil, "invalid theme header: " .. tostring(lines[HEADER.LINE_T])
+  end
 
-  return { cmd = cmd, nline = nline, w = w }, nil
+  return { cmd = cmd, nline = nline, w = w, t = t }, nil
 end
 
 
@@ -350,10 +413,12 @@ end
 -- - Else: if cache exists and has valid header: reuse cached recipe (LINE_CMD).
 -- - Else: fail (no recipe available).
 --
--- Always writes a 3-line header:
---   1) command template (exact string we use)
---   2) number of content lines (wc -l, trimmed)
---   3) width used (w, trimmed)
+-- Always writes a HEADER.N-line header:
+--   1) layout marker (HEADER.VERSION)
+--   2) command template (exact string we use)
+--   3) number of content lines (wc -l, trimmed)
+--   4) width used (w, trimmed)
+--   5) terminal theme used (t)
 ----------------------------------------------------------------------
 local function generate_cache(job, cache_path)
   local source_path = fs_path(job.file.url)
@@ -401,7 +466,7 @@ local function generate_cache(job, cache_path)
     (%s) > %s &&
     L=$(wc -l < %s | tr -d '[:space:]') &&
     W=$(printf '%%s' "$w" | tr -d '[:space:]') &&
-    { printf '%%s\n' "$FP_TPL"; printf '%%s\n' "$L"; printf '%%s\n' "$W"; cat %s; } > %s &&
+    { printf '%%s\n' "$FP_VER"; printf '%%s\n' "$FP_TPL"; printf '%%s\n' "$L"; printf '%%s\n' "$W"; printf '%%s\n' "$t"; cat %s; } > %s &&
     mv %s %s
   ]],
     final,
@@ -417,8 +482,9 @@ local function generate_cache(job, cache_path)
     :arg({ "-c", cmd })
     :env("w", tostring(job.area.w))
     :env("h", tostring(job.area.h))
-    :env("t", rt.term.light() and "light" or "dark")
+    :env("t", current_theme())
     :env("FP_TPL", tpl) -- EXACT template string we used
+    :env("FP_VER", HEADER.VERSION) -- header layout marker
     :stdin(Command.NULL)
     :stdout(Command.NULL)
     :stderr(Command.PIPED)
