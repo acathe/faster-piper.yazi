@@ -206,7 +206,8 @@ end
 
 -- Header-based freshness check:
 -- - cache mtime >= source mtime
--- - header parses
+-- - header parses and carries the current layout version
+-- - header recipe matches the requested one, IF Yazi passed one
 -- - header width matches current preview width
 -- - header theme matches current theme, IF the recipe uses $t
 -- Returns:
@@ -221,6 +222,17 @@ local function cache_is_fresh(job, cache_path)
 
   local hdr = read_cache_header(cache_path)
   if not hdr then
+    return false, nil
+  end
+
+  -- The recipe is part of the cache identity: output produced by a
+  -- different command is not a cache hit. Without this, editing a
+  -- preview command in yazi.toml left every existing cache in place.
+  --
+  -- Yazi omits the previewer arguments on some calls, e.g. seek. We
+  -- cannot compare then, and generate_cache recovers the stored recipe.
+  local tpl = job.args and job.args[1]
+  if tpl and tpl ~= "" and tpl ~= hdr.cmd then
     return false, nil
   end
 
