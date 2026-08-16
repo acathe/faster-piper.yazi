@@ -27,6 +27,11 @@ local HEADER = {
   -- Bump this on ANY change to the layout below. A cache written by an
   -- older version then fails validation, is removed, and is regenerated.
   -- This is what makes header changes safe; there is no migration path.
+  --
+  -- It is NOT the plugin version, and must not follow it. A release that
+  -- leaves this layout untouched keeps the same marker, so caches stay
+  -- valid across upgrades. Bumping it needlessly discards every user's
+  -- cached preview for nothing.
   VERSION = "FPCACHE1",
 
   -- Total number of header lines stored at the top of the cache file.
