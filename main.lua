@@ -30,14 +30,15 @@ local HEADER = {
   VERSION = "FPCACHE1",
 
   -- Total number of header lines stored at the top of the cache file.
-  N = 5,
+  N = 6,
 
   -- Which header line contains what (1-based):
   LINE_VER   = 1, -- layout marker, must equal HEADER.VERSION
   LINE_CMD   = 2, -- raw user-provided command template (job.args[1], unchanged)
   LINE_NLINE = 3, -- number of *content* lines (excludes headers)
   LINE_W     = 4, -- preview width used to generate this cache
-  LINE_T     = 5, -- terminal theme used to generate this cache ("dark"|"light")
+  LINE_H     = 5, -- preview height used to generate this cache
+  LINE_T     = 6, -- terminal theme used to generate this cache ("dark"|"light")
 }
 
 -- Content starts immediately after the header.
@@ -208,8 +209,8 @@ end
 -- - cache mtime >= source mtime
 -- - header parses and carries the current layout version
 -- - header recipe matches the requested one, IF Yazi passed one
--- - header width matches current preview width
--- - header theme matches current theme, IF the recipe uses $t
+-- - header w/h/theme match the current ones, EACH only if the recipe
+--   reads the matching variable ($w, $h, $t)
 -- Returns:
 --   ok, hdr
 -- where hdr is the parsed header if available.
@@ -226,8 +227,7 @@ local function cache_is_fresh(job, cache_path)
   end
 
   -- The recipe is part of the cache identity: output produced by a
-  -- different command is not a cache hit. Without this, editing a
-  -- preview command in yazi.toml left every existing cache in place.
+  -- different command is not a cache hit.
   --
   -- Yazi omits the previewer arguments on some calls, e.g. seek. We
   -- cannot compare then, and generate_cache recovers the stored recipe.
@@ -236,17 +236,25 @@ local function cache_is_fresh(job, cache_path)
     return false, nil
   end
 
-  if hdr.w ~= job.area.w then
+  -- Below, only the variables the recipe actually reads can affect its
+  -- output, so only those invalidate the cache. A recipe that ignores
+  -- $w produces identical bytes at any width; discarding its cache on
+  -- every resize would be pure waste.
+  --
+  -- This assumes the command learns the geometry and the theme from us,
+  -- not by inspecting the terminal itself. That holds here, because
+  -- stdout is redirected to the cache file and stdin is closed, so a
+  -- command sees a pipe rather than a terminal.
+  --
+  -- Caveat: a command that detects the theme through its own channel
+  -- (e.g. `bat --theme=auto:always`) defeats the $t test, and its cache
+  -- will not refresh. See the README.
+  if uses_env(hdr.cmd, "w") and hdr.w ~= job.area.w then
     return false, nil
   end
-
-  -- Only the theme the recipe actually reads can affect its output.
-  -- A recipe without $t is theme-independent, so a theme change must
-  -- not throw its cache away.
-  --
-  -- Caveat: a command that detects the theme by itself (e.g.
-  -- `bat --theme=auto:always`) is invisible to this test, and its cache
-  -- will not refresh. See the README.
+  if uses_env(hdr.cmd, "h") and hdr.h ~= job.area.h then
+    return false, nil
+  end
   if uses_env(hdr.cmd, "t") and hdr.t ~= current_theme() then
     return false, nil
   end
@@ -398,6 +406,7 @@ read_cache_header = function(cache_path)
   local cmd = lines[HEADER.LINE_CMD]
   local nline = tonumber((lines[HEADER.LINE_NLINE] or ""):match("^%s*(%d+)%s*$"))
   local w = tonumber((lines[HEADER.LINE_W] or ""):match("^%s*(%d+)%s*$"))
+  local h = tonumber((lines[HEADER.LINE_H] or ""):match("^%s*(%d+)%s*$"))
   local t = (lines[HEADER.LINE_T] or ""):match("^%s*(%a+)%s*$")
 
   if cmd == nil then
@@ -409,11 +418,14 @@ read_cache_header = function(cache_path)
   if not w then
     return nil, "invalid width header: " .. tostring(lines[HEADER.LINE_W])
   end
+  if not h then
+    return nil, "invalid height header: " .. tostring(lines[HEADER.LINE_H])
+  end
   if t ~= "dark" and t ~= "light" then
     return nil, "invalid theme header: " .. tostring(lines[HEADER.LINE_T])
   end
 
-  return { cmd = cmd, nline = nline, w = w, t = t }, nil
+  return { cmd = cmd, nline = nline, w = w, h = h, t = t }, nil
 end
 
 
@@ -430,7 +442,8 @@ end
 --   2) command template (exact string we use)
 --   3) number of content lines (wc -l, trimmed)
 --   4) width used (w, trimmed)
---   5) terminal theme used (t)
+--   5) height used (h, trimmed)
+--   6) terminal theme used (t)
 ----------------------------------------------------------------------
 local function generate_cache(job, cache_path)
   local source_path = fs_path(job.file.url)
@@ -473,12 +486,13 @@ local function generate_cache(job, cache_path)
   -- 3) Generate content into cache_path (temporary), then build header+content into tmp, then mv
   --
   -- - We trim whitespace from wc output to avoid leading spaces.
-  -- - We also trim $w to be safe.
+  -- - We also trim $w and $h to be safe.
   local cmd = string.format([[
     (%s) > %s &&
     L=$(wc -l < %s | tr -d '[:space:]') &&
     W=$(printf '%%s' "$w" | tr -d '[:space:]') &&
-    { printf '%%s\n' "$FP_VER"; printf '%%s\n' "$FP_TPL"; printf '%%s\n' "$L"; printf '%%s\n' "$W"; printf '%%s\n' "$t"; cat %s; } > %s &&
+    H=$(printf '%%s' "$h" | tr -d '[:space:]') &&
+    { printf '%%s\n' "$FP_VER"; printf '%%s\n' "$FP_TPL"; printf '%%s\n' "$L"; printf '%%s\n' "$W"; printf '%%s\n' "$H"; printf '%%s\n' "$t"; cat %s; } > %s &&
     mv %s %s
   ]],
     final,
