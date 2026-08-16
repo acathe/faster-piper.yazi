@@ -1,4 +1,4 @@
---- @since 10.01.2026
+--- @since 26.8.15
 local M = {}
 
 -- If Yazi asks for a skip larger than this, jump straight to the last page.
