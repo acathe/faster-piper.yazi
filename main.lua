@@ -97,7 +97,7 @@ end
 --
 -- How:
 --   Yazi already exposes the underlying path via `url.path`, and also tells
---   us whether this Url comes from search using `url.is_search`.
+--   us whether this Url comes from search using `url.spec.is_search`.
 --
 -- Behavior:
 --   - For search URLs: return tostring(url.path)
@@ -105,7 +105,7 @@ end
 --   - Defensive fallback: if url.path is missing/empty, fall back to tostring(url)
 ----------------------------------------------------------------------
 local function fs_path(url)
-  if url and url.is_search then
+  if url and url.spec.is_search then
     local p = url.path
     if p then
       local s = tostring(p)
@@ -150,10 +150,10 @@ function M.format(job, lines)
   for i = 1, #lines do
     lines[i] = lines[i]:gsub("[\r\n]+$", "")
 
-    local icon = File({
+    local icon = th.icon:match(File {
       url = Url(lines[i]),
       cha = Cha { mode = tonumber(lines[i]:sub(-1) == "/" and "40700" or "100644", 8) },
-    }):icon()
+    })
 
     if icon then
       lines[i] = ui.Line { ui.Span(" " .. icon.text .. " "):style(icon.style), lines[i] }
