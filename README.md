@@ -34,14 +34,24 @@ performance and predictability for expensive preview commands.
 Existing configurations written for `piper.yazi` continue to work without
 modification. The command format, variables, and preview semantics are the same:
 
-- `$1` — path to the file being previewed
+- `$1` — path to the file being previewed, always written as `"$1"` with the
+  double quotes; the quoted form is what gets replaced by the escaped path
 - `$w` — preview width
 - `$h` — preview height
 - `$t` — detected terminal theme, either `dark` or `light`
 
-`$t` is passed to the shell when a cache is generated. Changing only the terminal
-theme does not invalidate an existing cache; the new value takes effect the next
-time that cache is regenerated.
+`$t` comes from Yazi's own terminal detection, so previews match the rest of the
+interface. If your terminal does not report a colour scheme, `$t` is `dark`.
+
+Changing the terminal theme invalidates the cache, but only for commands that
+actually use `$t`. A command without `$t` produces the same output either way,
+so its cache is kept.
+
+> **Note**
+> faster-piper can only see the theme through `$t`. If your command detects the
+> theme by itself — for example `bat --theme=auto:always` — faster-piper cannot
+> know that its output depends on the theme, and the cache will not refresh when
+> you switch. Use `$t` instead.
 
 You can replace `piper` with `faster-piper` in your Yazi configuration and keep
 using the same preview commands.
@@ -66,11 +76,20 @@ run = 'faster-piper -- CLICOLOR_FORCE=1 glow -w=$w -s=dracula -- "$1"'
 
 #### Example: Match the terminal theme with `bat`
 
+`bat` accepts `dark` and `light` as `--theme` values, which is exactly what `$t`
+holds, so the two map onto each other directly:
+
 ```toml
 [[plugin.prepend_previewers]]
 url = "*.rs"
-run = 'faster-piper -- bat -p --color=always --theme="$([ "$t" = "dark" ] && echo Dracula || echo GitHub)" "$1"'
+run = 'faster-piper -- bat -p --color=always --theme-dark=Dracula --theme-light=GitHub --theme="$t" "$1"'
 ```
+
+Do not rely on `bat`'s own `--theme=auto` here. Preview output is redirected to
+the cache file rather than to the terminal, so plain `auto` cannot detect
+anything and falls back to a dark theme. `--theme=auto:always` does detect, but
+it queries the terminal that Yazi is already reading from, and its result is
+invisible to the cache. `$t` avoids both problems.
 
 #### Example: Preview tarballs with `tar`
 
