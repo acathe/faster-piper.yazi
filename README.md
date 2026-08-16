@@ -8,6 +8,11 @@ and efficient scrolling for large outputs.
 
 ## Installation
 
+**Requires Yazi 26.8.15 or newer.** Earlier versions lack the `th.icon:match` and
+`Url.spec.is_search` APIs this plugin uses, and Yazi will refuse to load it with a
+prompt to upgrade. If you cannot upgrade Yazi, use
+[`piper.yazi`](https://github.com/yazi-rs/plugins/tree/main/piper.yazi) instead.
+
 ```sh
 ya pkg add alberti42/faster-piper
 ```
