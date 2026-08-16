@@ -39,3 +39,8 @@ luac.out
 *.x86_64
 *.hex
 
+# Claude Code
+.claude/*.local.json
+.claude/**/*.log
+CLAUDE.local.md
+.claude/

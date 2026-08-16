@@ -37,6 +37,11 @@ modification. The command format, variables, and preview semantics are the same:
 - `$1` — path to the file being previewed
 - `$w` — preview width
 - `$h` — preview height
+- `$t` — detected terminal theme, either `dark` or `light`
+
+`$t` is passed to the shell when a cache is generated. Changing only the terminal
+theme does not invalidate an existing cache; the new value takes effect the next
+time that cache is regenerated.
 
 You can replace `piper` with `faster-piper` in your Yazi configuration and keep
 using the same preview commands.
@@ -57,6 +62,14 @@ The command’s stdout becomes the preview content.
 [[plugin.prepend_previewers]]
 url = "*.md"
 run = 'faster-piper -- CLICOLOR_FORCE=1 glow -w=$w -s=dracula -- "$1"'
+```
+
+#### Example: Match the terminal theme with `bat`
+
+```toml
+[[plugin.prepend_previewers]]
+url = "*.rs"
+run = 'faster-piper -- bat -p --color=always --theme="$([ "$t" = "dark" ] && echo Dracula || echo GitHub)" "$1"'
 ```
 
 #### Example: Preview tarballs with `tar`
