@@ -43,21 +43,27 @@ modification. The command format, variables, and preview semantics are the same:
 `$t` comes from Yazi's own terminal detection, so previews match the rest of the
 interface. If your terminal does not report a colour scheme, `$t` is `dark`.
 
-Changing the terminal theme invalidates the cache, but only for commands that
-actually use `$t`. A command without `$t` produces the same output either way,
-so its cache is kept.
+You can replace `piper` with `faster-piper` in your Yazi configuration and keep
+using the same preview commands.
+
+For more usage examples and ideas, please refer to the original
+[`piper.yazi` README](https://github.com/yazi-rs/plugins/tree/main/piper).
+
+## Caching
+
+A preview is generated once and reused. The cache is discarded when the file
+changes, when you edit the command in `yazi.toml`, and when one of `$w`, `$h` or
+`$t` changes — but each of those only if your command actually reads it.
+
+So resizing the preview pane regenerates a `glow -w=$w` preview, and leaves a
+`tar -tf "$1"` preview alone, because the second produces the same output at any
+size.
 
 > **Note**
 > faster-piper can only see the theme through `$t`. If your command detects the
 > theme by itself — for example `bat --theme=auto:always` — faster-piper cannot
 > know that its output depends on the theme, and the cache will not refresh when
 > you switch. Use `$t` instead.
-
-You can replace `piper` with `faster-piper` in your Yazi configuration and keep
-using the same preview commands.
-
-For more usage examples and ideas, please refer to the original
-[`piper.yazi` README](https://github.com/yazi-rs/plugins/tree/main/piper).
 
 ## Usage
 
